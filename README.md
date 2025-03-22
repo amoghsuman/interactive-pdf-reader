@@ -23,5 +23,5 @@ This project allows users to upload a PDF and ask natural language questions abo
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/interactive-pdf-reader.git
+git clone https://github.com/amoghsuman/interactive-pdf-reader.git
 cd interactive-pdf-reader
