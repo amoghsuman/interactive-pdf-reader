@@ -5,7 +5,8 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.vectorstores import FAISS
-from langchain.document_loaders import PyPDFLoader
+#from langchain.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader
 from PyPDF2 import PdfReader, PdfWriter
 from tempfile import NamedTemporaryFile
 import base64
@@ -81,7 +82,7 @@ def main():
                 with NamedTemporaryFile(suffix="pdf") as temp:
                     temp.write(st.session_state.pdf_doc.getvalue())
                     temp.seek(0)
-                    loader = PyPDFLoader(temp.name)
+                    loader = PyMuPDFLoader(temp.name)
                     pdf = loader.load()
                     st.session_state.conversation = process_file(pdf)
                     st.session_state.col1.markdown("✅ Done processing. You may now ask a question.")
