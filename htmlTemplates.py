@@ -9,6 +9,15 @@ css = """
 </style>
 """
 
+expander_css = """
+<style>
+.streamlit-expanderHeader {
+    font-weight: bold;
+    font-size: 18px;
+}
+</style>
+"""
+
 bot_template = """
 <div class="chat-container"><b>🤖 Bot:</b> {}</div>
 """
