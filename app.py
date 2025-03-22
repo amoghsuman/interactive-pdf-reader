@@ -12,7 +12,7 @@ import base64
 from htmlTemplates import expander_css, css, bot_template, user_template
 from datetime import datetime
 
-# Step 1: Process the PDF
+# Step 1: Process PDF
 def process_file(doc):
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2",
@@ -27,7 +27,7 @@ def process_file(doc):
     )
     return chain
 
-# Step 2: Handle User Input
+# Step 2: Handle question
 def handle_userinput(query):
     response = st.session_state.conversation(
         {"question": query, 'chat_history': [(q, a) for q, a, _ in st.session_state.chat_history]},
@@ -40,7 +40,7 @@ def handle_userinput(query):
 
     timestamp = datetime.now().strftime("%b %d, %I:%M %p")
     st.session_state.chat_history.append((query, answer, timestamp))
-    st.session_state.source_page = page_num
+    st.session_state.scroll_to_page = page_num  # 👈 for iframe jump
 
     for message in reversed(st.session_state.chat_history):
         user_msg, bot_msg, ts = message
@@ -50,13 +50,13 @@ def handle_userinput(query):
         st.session_state.expander1.write(bot_template.replace("{{MSG}}", bot_msg), unsafe_allow_html=True)
         st.session_state.expander1.markdown("<hr style='margin: 5px 0; border: none; border-top: 1px solid #ccc;' />", unsafe_allow_html=True)
 
-# Step 3: Streamlit App
+# Step 3: Main App
 def main():
     load_dotenv()
     st.set_page_config(layout="wide", page_title="Interactive Reader", page_icon=":books:")
     st.write(css, unsafe_allow_html=True)
 
-    for key in ["conversation", "chat_history", "source_page"]:
+    for key in ["conversation", "chat_history", "scroll_to_page"]:
         if key not in st.session_state:
             st.session_state[key] = None if key != "chat_history" else []
 
@@ -80,35 +80,29 @@ def main():
                     st.session_state.conversation = process_file(pdf)
                     st.session_state.col1.markdown("✅ Done processing. You may now ask a question.")
 
+                # Save full file for iframe usage
+                st.session_state.full_pdf_path = temp.name
+
+    # Handle Q&A
     if user_question:
         if st.session_state.conversation is not None:
             handle_userinput(user_question)
 
-            with NamedTemporaryFile(suffix="pdf", delete=False) as temp:
-                temp.write(st.session_state.pdf_doc.getvalue())
-                temp.flush()
-                reader = PdfReader(temp.name)
+    # Always show full PDF (scrollable), jumping to relevant page
+    if st.session_state.pdf_doc is not None:
+        with NamedTemporaryFile(suffix="pdf", delete=False) as full_temp:
+            full_temp.write(st.session_state.pdf_doc.getvalue())
+            full_temp.flush()
+            with open(full_temp.name, "rb") as f:
+                base64_pdf = base64.b64encode(f.read()).decode("utf-8")
 
-                source_page = st.session_state.source_page
-                start = max(source_page - 2, 0)
-                end = min(source_page + 2, len(reader.pages) - 1)
-
-                pdf_writer = PdfWriter()
-                for i in range(start, end + 1):
-                    pdf_writer.add_page(reader.pages[i])
-
-                with NamedTemporaryFile(suffix="pdf", delete=False) as temp2:
-                    pdf_writer.write(temp2.name)
-                    with open(temp2.name, "rb") as f:
-                        base64_pdf = base64.b64encode(f.read()).decode("utf-8")
-
-                st.session_state.col2.markdown(
-                    f'<iframe src="data:application/pdf;base64,{base64_pdf}#page=1" '
-                    f'width="100%" height="900" type="application/pdf" frameborder="0"></iframe>',
-                    unsafe_allow_html=True
-                )
-        else:
-            st.session_state.col1.warning("⚠️ Please upload and process a PDF before asking a question.")
+        # Default page = 1 (0-indexed + 1)
+        scroll_page = (st.session_state.scroll_to_page or 0) + 1
+        st.session_state.col2.markdown(
+            f'<iframe src="data:application/pdf;base64,{base64_pdf}#page={scroll_page}" '
+            f'width="100%" height="900" type="application/pdf" frameborder="0"></iframe>',
+            unsafe_allow_html=True
+        )
 
 if __name__ == '__main__':
     main()
