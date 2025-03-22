@@ -34,24 +34,30 @@ def process_file(doc):
     return chain
 
 # Task 6: Method for Handling User Input
+from datetime import datetime
+
 def handle_userinput(query):
     response = st.session_state.conversation(
-        {"question": query, 'chat_history': st.session_state.chat_history},
+        {"question": query, 'chat_history': [(q, a) for q, a, _ in st.session_state.chat_history]},
         return_only_outputs=True
     )
 
-    st.session_state.chat_history += [(query, response['answer'])]
-
     st.session_state.N = list(response['source_documents'][0])[1][1]['page']
+    timestamp = datetime.now().strftime("%b %d, %I:%M %p")
 
-    #for i, message in enumerate(st.session_state.chat_history):
-     #   st.session_state.expander1.write(user_template.replace("{{MSG}}", message[0]), unsafe_allow_html=True)
-      #  st.session_state.expander1.write(bot_template.replace("{{MSG}}", message[1]), unsafe_allow_html=True)
+    st.session_state.chat_history += [(query, response['answer'], timestamp)]
 
-    # ✅ Display most recent messages at the top
     for message in reversed(st.session_state.chat_history):
-        st.session_state.expander1.write(user_template.replace("{{MSG}}", message[0]), unsafe_allow_html=True)
-        st.session_state.expander1.write(bot_template.replace("{{MSG}}", message[1]), unsafe_allow_html=True)
+        user_msg, bot_msg, ts = message
+
+        st.session_state.expander1.markdown(f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>", unsafe_allow_html=True)
+        st.session_state.expander1.write(user_template.replace("{{MSG}}", user_msg), unsafe_allow_html=True)
+
+        st.session_state.expander1.markdown(f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>", unsafe_allow_html=True)
+        st.session_state.expander1.write(bot_template.replace("{{MSG}}", bot_msg), unsafe_allow_html=True)
+
+        st.session_state.expander1.markdown("<hr style='margin: 5px 0; border: none; border-top: 1px solid #ccc;' />", unsafe_allow_html=True)
+
 
 def main():
     # Task 3: Create Web-page Layout
