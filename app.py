@@ -1,4 +1,5 @@
 import os
+import re
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -44,9 +45,10 @@ def handle_userinput(query):
 
     answer = response['answer'].strip()
     source_doc = response['source_documents'][0]
+    chunk = source_doc.page_content.strip()
     page_num = source_doc.metadata.get("page", 0)
 
-    # Extract the most similar line to the answer from the actual PDF page
+    # Extract the matching line from the page
     with NamedTemporaryFile(suffix="pdf", delete=False) as temp:
         temp.write(st.session_state.pdf_doc.getvalue())
         temp.flush()
@@ -56,22 +58,30 @@ def handle_userinput(query):
         lines = page_text.splitlines()
         doc.close()
 
-    best_score = 0
-    best_line = ""
-    for line in lines:
-        score = fuzz.partial_ratio(line.lower(), answer.lower())
-        if score > best_score:
-            best_score = score
-            best_line = line.strip()
+    # First, try exact answer match
+    exact_matches = [line for line in lines if answer in line]
+    if exact_matches:
+        highlight_text = exact_matches[0].strip()
+        print("✅ Exact answer match found:", highlight_text)
+    else:
+        # Fallback: fuzzy match with lines from retrieved chunk
+        best_score = 0
+        best_line = ""
+        for line in chunk.splitlines():
+            for pageline in lines:
+                score = fuzz.partial_ratio(line.lower(), pageline.lower())
+                if score > best_score:
+                    best_score = score
+                    best_line = pageline.strip()
+        highlight_text = best_line if best_score > 60 else answer[:80]
+        print("⚠️ Fallback fuzzy match used:", highlight_text)
 
-    highlight_text = best_line if best_score > 60 else answer[:80]
-
-    # Store info in session
+    # Store in session
     timestamp = datetime.now().strftime("%b %d, %I:%M %p")
     st.session_state.chat_history.append((query, answer, timestamp))
     st.session_state.source_info = {"text": highlight_text, "page": page_num}
 
-    # Display chat
+    # Show chat
     for message in reversed(st.session_state.chat_history):
         user_msg, bot_msg, ts = message
         st.session_state.expander1.markdown(f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>", unsafe_allow_html=True)
@@ -133,8 +143,9 @@ def main():
                     if matches:
                         for m in matches:
                             page.add_highlight_annot(m)
+                        print("✅ Highlighted:", highlight_text)
                     else:
-                        print("❗ No exact match found for highlighting.")
+                        print("❌ No matches found for:", highlight_text)
                 except Exception as e:
                     print("Highlighting error:", e)
 
