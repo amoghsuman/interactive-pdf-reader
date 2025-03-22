@@ -16,28 +16,23 @@ from datetime import datetime
 import fitz  # PyMuPDF
 from fuzzywuzzy import fuzz
 
-# Process PDF using LangChain
+# Step 1: Process PDF
 def process_file(doc):
-    model_name = "sentence-transformers/all-MiniLM-L6-v2"
-    model_kwargs = {'device': 'cpu'}
-    encode_kwargs = {'normalize_embeddings': False}
-
     embeddings = HuggingFaceEmbeddings(
-        model_name=model_name,
-        model_kwargs=model_kwargs,
-        encode_kwargs=encode_kwargs
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={'device': 'cpu'},
+        encode_kwargs={'normalize_embeddings': False}
     )
-
-    pdfsearch = FAISS.from_documents(doc, embeddings)
+    vectorstore = FAISS.from_documents(doc, embeddings)
 
     chain = ConversationalRetrievalChain.from_llm(
         ChatOpenAI(temperature=0.3, openai_api_key=os.getenv("OPENAI_API_KEY")),
-        retriever=pdfsearch.as_retriever(search_kwargs={"k": 2}),
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 2}),
         return_source_documents=True
     )
     return chain
 
-# Handle user question and highlight logic
+# Step 2: Handle User Input
 def handle_userinput(query):
     response = st.session_state.conversation(
         {"question": query, 'chat_history': [(q, a) for q, a, _ in st.session_state.chat_history]},
@@ -49,14 +44,12 @@ def handle_userinput(query):
     chunk = source_doc.page_content.strip()
     page_num = source_doc.metadata.get("page", 0)
 
-    highlight_text = find_precise_highlight_text(answer, chunk, page_num)
+    highlight_text = find_best_match_using_fuzzy_window(answer, page_num)
 
-    # Store in session
     timestamp = datetime.now().strftime("%b %d, %I:%M %p")
     st.session_state.chat_history.append((query, answer, timestamp))
     st.session_state.source_info = {"text": highlight_text, "page": page_num}
 
-    # Show chat history
     for message in reversed(st.session_state.chat_history):
         user_msg, bot_msg, ts = message
         st.session_state.expander1.markdown(f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>", unsafe_allow_html=True)
@@ -65,55 +58,50 @@ def handle_userinput(query):
         st.session_state.expander1.write(bot_template.replace("{{MSG}}", bot_msg), unsafe_allow_html=True)
         st.session_state.expander1.markdown("<hr style='margin: 5px 0; border: none; border-top: 1px solid #ccc;' />", unsafe_allow_html=True)
 
-# Finds the most accurate line to highlight from the actual PDF page
-def find_precise_highlight_text(answer, chunk, page_num):
+# Step 3: Fuzzy sliding window match
+def find_best_match_using_fuzzy_window(answer, page_num, window_size=6):
     with NamedTemporaryFile(suffix="pdf", delete=False) as temp:
         temp.write(st.session_state.pdf_doc.getvalue())
         temp.flush()
         doc = fitz.open(temp.name)
         page = doc.load_page(page_num)
-        words = page.get_text("words", delimiters=",.")  # list of tuples: (x0, y0, x1, y1, "word")
-        page_text = page.get_text("text")
+        words = page.get_text("words", delimiters=",.")  # (x0, y0, x1, y1, "word")
         doc.close()
 
-    # Tokenize answer for matching
-    clean_answer = answer.translate(str.maketrans('', '', string.punctuation)).strip()
-    snippet_tokens = clean_answer.split()
-    snippet_tokens = [t.lower() for t in snippet_tokens]
+    answer_clean = answer.translate(str.maketrans('', '', string.punctuation)).lower()
+    answer_tokens = answer_clean.split()
 
-    best_match = ""
     best_score = 0
     best_indices = (None, None)
+    best_phrase = ""
 
-    for i in range(len(words) - len(snippet_tokens) + 1):
-        seq = [words[i + j][4].lower().strip(string.punctuation) for j in range(len(snippet_tokens))]
-        score = fuzz.partial_ratio(" ".join(seq), " ".join(snippet_tokens))
-        if score > best_score:
-            best_score = score
-            best_indices = (i, i + len(snippet_tokens) - 1)
-            best_match = " ".join(seq)
+    for i in range(len(words) - 1):
+        for w in range(2, window_size + 1):
+            if i + w > len(words): break
+            window_tokens = [words[j][4].strip(string.punctuation).lower() for j in range(i, i + w)]
+            window_phrase = " ".join(window_tokens)
+            score = fuzz.partial_ratio(" ".join(answer_tokens), window_phrase)
+            if score > best_score:
+                best_score = score
+                best_indices = (i, i + w - 1)
+                best_phrase = window_phrase
 
     if best_score > 70:
         st.session_state.highlight_indices = (page_num, words, best_indices)
-        return best_match
+        return best_phrase
     else:
         st.session_state.highlight_indices = None
         return answer[:80]
 
-# Streamlit main
+# Step 4: Streamlit Frontend
 def main():
     load_dotenv()
     st.set_page_config(layout="wide", page_title="Interactive Reader", page_icon=":books:")
     st.write(css, unsafe_allow_html=True)
 
-    if "conversation" not in st.session_state:
-        st.session_state.conversation = None
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    if "source_info" not in st.session_state:
-        st.session_state.source_info = None
-    if "highlight_indices" not in st.session_state:
-        st.session_state.highlight_indices = None
+    for key in ["conversation", "chat_history", "source_info", "highlight_indices"]:
+        if key not in st.session_state:
+            st.session_state[key] = None if key != "chat_history" else []
 
     st.session_state.col1, st.session_state.col2 = st.columns([1, 1])
     st.session_state.col1.header("Interactive Reader :books:")
@@ -121,7 +109,6 @@ def main():
     st.session_state.expander1 = st.session_state.col1.expander('Your Chat', expanded=True)
     st.session_state.col1.markdown(expander_css, unsafe_allow_html=True)
 
-    # Upload & process PDF
     st.session_state.col1.subheader("Your documents")
     st.session_state.pdf_doc = st.session_state.col1.file_uploader("Upload your PDF here and click on 'Process'")
 
@@ -136,7 +123,6 @@ def main():
                     st.session_state.conversation = process_file(pdf)
                     st.session_state.col1.markdown("✅ Done processing. You may now ask a question.")
 
-    # Handle input & show PDF
     if user_question:
         if st.session_state.conversation is not None:
             handle_userinput(user_question)
@@ -145,35 +131,30 @@ def main():
                 temp.write(st.session_state.pdf_doc.getvalue())
                 temp.flush()
                 doc = fitz.open(temp.name)
-
-                highlight_text = st.session_state.source_info["text"]
                 page_num = st.session_state.source_info["page"]
+                highlight_text = st.session_state.source_info["text"]
+                page = doc.load_page(page_num)
 
-                try:
-                    page = doc.load_page(page_num)
-
-                    if st.session_state.highlight_indices:
-                        _, words, (start_idx, end_idx) = st.session_state.highlight_indices
-                        rects = [fitz.Rect(words[i][:4]) for i in range(start_idx, end_idx + 1)]
-                        page.add_highlight_annot(rects)
-                    else:
-                        matches = page.search_for(highlight_text)
-                        for m in matches:
-                            page.add_highlight_annot(m)
-
-                except Exception as e:
-                    print("Highlighting error:", e)
+                if st.session_state.highlight_indices:
+                    _, words, (start, end) = st.session_state.highlight_indices
+                    rects = [fitz.Rect(words[i][:4]) for i in range(start, end + 1)]
+                    page.add_highlight_annot(rects)
+                else:
+                    matches = page.search_for(highlight_text)
+                    for m in matches:
+                        page.add_highlight_annot(m)
 
                 with NamedTemporaryFile(suffix="pdf", delete=False) as highlighted_temp_pdf:
                     doc.save(highlighted_temp_pdf.name)
                     doc.close()
-
                     with open(highlighted_temp_pdf.name, "rb") as f:
                         base64_pdf = base64.b64encode(f.read()).decode('utf-8')
 
-                    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}#page={page_num + 1}" ' \
-                                  f'width="100%" height="900" type="application/pdf" frameborder="0"></iframe>'
-                    st.session_state.col2.markdown(pdf_display, unsafe_allow_html=True)
+                st.session_state.col2.markdown(
+                    f'<iframe src="data:application/pdf;base64,{base64_pdf}#page={page_num + 1}" '
+                    f'width="100%" height="900" type="application/pdf" frameborder="0"></iframe>',
+                    unsafe_allow_html=True
+                )
         else:
             st.session_state.col1.warning("⚠️ Please upload and process a PDF before asking a question.")
 
