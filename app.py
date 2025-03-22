@@ -1,5 +1,6 @@
 # Task 1: Import the Libraries
 import os
+import re
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -13,6 +14,7 @@ import base64
 from htmlTemplates import expander_css, css, bot_template, user_template
 from datetime import datetime
 import fitz  # PyMuPDF
+from fuzzywuzzy import fuzz
 
 # Task 4: Process the Input PDF
 def process_file(doc):
@@ -43,12 +45,17 @@ def handle_userinput(query):
     )
 
     source_doc = response['source_documents'][0]
-    source_text = source_doc.page_content.strip()
+    full_chunk = source_doc.page_content.strip()
+    answer = response['answer'].strip()
     page_num = source_doc.metadata.get("page", 0)
 
+    # Break chunk into sentences and find the best match with the answer
+    sentences = re.split(r'(?<=[.!?]) +', full_chunk)
+    best_sentence = max(sentences, key=lambda s: fuzz.partial_ratio(s, answer))
+
     timestamp = datetime.now().strftime("%b %d, %I:%M %p")
-    st.session_state.chat_history.append((query, response['answer'], timestamp))
-    st.session_state.source_info = {"text": source_text, "page": page_num}
+    st.session_state.chat_history.append((query, answer, timestamp))
+    st.session_state.source_info = {"text": best_sentence, "page": page_num}
 
     for message in reversed(st.session_state.chat_history):
         user_msg, bot_msg, ts = message
@@ -97,23 +104,23 @@ def main():
         if st.session_state.conversation is not None:
             handle_userinput(user_question)
 
-            # Highlight the source text in the PDF
+            # Highlight the most relevant sentence in the PDF
             with NamedTemporaryFile(suffix="pdf", delete=False) as temp:
                 temp.write(st.session_state.pdf_doc.getvalue())
                 temp.flush()
 
                 doc = fitz.open(temp.name)
-                source_text = st.session_state.source_info["text"]
+                highlight_text = st.session_state.source_info["text"]
                 page_num = st.session_state.source_info["page"]
 
                 try:
                     page = doc.load_page(page_num)
-                    matches = page.search_for(source_text)
+                    matches = page.search_for(highlight_text)
                     if matches:
                         for m in matches:
                             page.add_highlight_annot(m)
                     else:
-                        print("❗ Text not found exactly, skipping highlight.")
+                        print("❗ No exact match found for highlighting.")
                 except Exception as e:
                     print("Highlighting error:", e)
 

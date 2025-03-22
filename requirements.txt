@@ -9,3 +9,5 @@ huggingface_hub
 sentence-transformers
 pymupdf
 pdfminer.six
+fuzzywuzzy #Use fuzzy matching to find the sentence most likely used in the final answer
+python-Levenshtein  # optional but makes it faster
