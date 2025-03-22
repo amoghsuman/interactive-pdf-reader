@@ -7,10 +7,12 @@ from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyMuPDFLoader
-from PyPDF2 import PdfReader, PdfWriter
+from PyPDF2 import PdfReader
 from tempfile import NamedTemporaryFile
 import base64
 from htmlTemplates import expander_css, css, bot_template, user_template
+from datetime import datetime
+import fitz  # PyMuPDF
 
 # Task 4: Process the Input PDF
 def process_file(doc):
@@ -36,22 +38,25 @@ def process_file(doc):
 # Task 6: Method for Handling User Input
 def handle_userinput(query):
     response = st.session_state.conversation(
-        {"question": query, 'chat_history': st.session_state.chat_history},
+        {"question": query, 'chat_history': [(q, a) for q, a, _ in st.session_state.chat_history]},
         return_only_outputs=True
     )
 
-    st.session_state.chat_history += [(query, response['answer'])]
+    source_doc = response['source_documents'][0]
+    source_text = source_doc.page_content.strip()
+    page_num = source_doc.metadata.get("page", 0)
 
-    st.session_state.N = list(response['source_documents'][0])[1][1]['page']
+    timestamp = datetime.now().strftime("%b %d, %I:%M %p")
+    st.session_state.chat_history.append((query, response['answer'], timestamp))
+    st.session_state.source_info = {"text": source_text, "page": page_num}
 
-    #for i, message in enumerate(st.session_state.chat_history):
-     #   st.session_state.expander1.write(user_template.replace("{{MSG}}", message[0]), unsafe_allow_html=True)
-      #  st.session_state.expander1.write(bot_template.replace("{{MSG}}", message[1]), unsafe_allow_html=True)
-
-    # ✅ Display most recent messages at the top
     for message in reversed(st.session_state.chat_history):
-        st.session_state.expander1.write(user_template.replace("{{MSG}}", message[0]), unsafe_allow_html=True)
-        st.session_state.expander1.write(bot_template.replace("{{MSG}}", message[1]), unsafe_allow_html=True)
+        user_msg, bot_msg, ts = message
+        st.session_state.expander1.markdown(f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>", unsafe_allow_html=True)
+        st.session_state.expander1.write(user_template.replace("{{MSG}}", user_msg), unsafe_allow_html=True)
+        st.session_state.expander1.markdown(f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>", unsafe_allow_html=True)
+        st.session_state.expander1.write(bot_template.replace("{{MSG}}", bot_msg), unsafe_allow_html=True)
+        st.session_state.expander1.markdown("<hr style='margin: 5px 0; border: none; border-top: 1px solid #ccc;' />", unsafe_allow_html=True)
 
 def main():
     # Task 3: Create Web-page Layout
@@ -63,8 +68,8 @@ def main():
         st.session_state.conversation = None
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
-    if "N" not in st.session_state:
-        st.session_state.N = 0
+    if "source_info" not in st.session_state:
+        st.session_state.source_info = None
 
     st.session_state.col1, st.session_state.col2 = st.columns([1, 1])
     st.session_state.col1.header("Interactive Reader :books:")
@@ -79,40 +84,49 @@ def main():
     if st.session_state.col1.button("Process", key='a'):
         with st.spinner("Processing"):
             if st.session_state.pdf_doc is not None:
-                with NamedTemporaryFile(suffix="pdf") as temp:
+                with NamedTemporaryFile(suffix="pdf", delete=False) as temp:
                     temp.write(st.session_state.pdf_doc.getvalue())
-                    temp.seek(0)
+                    temp.flush()
                     loader = PyMuPDFLoader(temp.name)
                     pdf = loader.load()
                     st.session_state.conversation = process_file(pdf)
                     st.session_state.col1.markdown("✅ Done processing. You may now ask a question.")
 
-    # Task 7: Handle Query and Display Pages
+    # Task 7: Handle Query and Highlight in PDF
     if user_question:
         if st.session_state.conversation is not None:
             handle_userinput(user_question)
 
-            with NamedTemporaryFile(suffix="pdf") as temp:
+            # Highlight the source text in the PDF
+            with NamedTemporaryFile(suffix="pdf", delete=False) as temp:
                 temp.write(st.session_state.pdf_doc.getvalue())
-                temp.seek(0)
-                reader = PdfReader(temp.name)
+                temp.flush()
 
-                pdf_writer = PdfWriter()
-                start = max(st.session_state.N - 2, 0)
-                end = min(st.session_state.N + 2, len(reader.pages) - 1)
-                while start <= end:
-                    pdf_writer.add_page(reader.pages[start])
-                    start += 1
+                doc = fitz.open(temp.name)
+                source_text = st.session_state.source_info["text"]
+                page_num = st.session_state.source_info["page"]
 
-                with NamedTemporaryFile(suffix="pdf") as temp2:
-                    pdf_writer.write(temp2.name)
-                    with open(temp2.name, "rb") as f:
+                try:
+                    page = doc.load_page(page_num)
+                    matches = page.search_for(source_text)
+                    if matches:
+                        for m in matches:
+                            page.add_highlight_annot(m)
+                    else:
+                        print("❗ Text not found exactly, skipping highlight.")
+                except Exception as e:
+                    print("Highlighting error:", e)
+
+                with NamedTemporaryFile(suffix="pdf", delete=False) as highlighted_temp_pdf:
+                    doc.save(highlighted_temp_pdf.name)
+                    doc.close()
+
+                    with open(highlighted_temp_pdf.name, "rb") as f:
                         base64_pdf = base64.b64encode(f.read()).decode('utf-8')
 
-                        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}#page=1" ' \
-                                      f'width="100%" height="900" type="application/pdf" frameborder="0"></iframe>'
-
-                        st.session_state.col2.markdown(pdf_display, unsafe_allow_html=True)
+                    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}#page={page_num + 1}" ' \
+                                  f'width="100%" height="900" type="application/pdf" frameborder="0"></iframe>'
+                    st.session_state.col2.markdown(pdf_display, unsafe_allow_html=True)
         else:
             st.session_state.col1.warning("⚠️ Please upload and process a PDF before asking a question.")
 
