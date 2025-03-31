@@ -56,7 +56,10 @@ def main():
 
     st.session_state.col1, st.session_state.col2 = st.columns([1, 1])
     st.session_state.col1.header("Interactive Reader :books:")
-    user_question = st.session_state.col1.text_input("Ask a question on the contents of the uploaded PDF:")
+    with st.session_state.col1.form("user_input_form", clear_on_submit=True):
+        user_question = st.text_input("Ask a question on the contents of the uploaded PDF:")
+        submitted = st.form_submit_button("Ask")
+
     st.session_state.expander1 = st.session_state.col1.expander("Your Chat", expanded=True)
     st.session_state.col1.markdown(expander_css, unsafe_allow_html=True)
 
@@ -85,7 +88,7 @@ def main():
                 st.session_state.col1.success("✅ Done processing. You may now ask a question.")
 
     # Process question
-    if user_question:
+    if submitted and user_question:
         if st.session_state.conversation is not None:
             handle_userinput(user_question)
         else:
