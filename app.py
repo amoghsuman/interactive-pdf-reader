@@ -11,6 +11,7 @@ from tempfile import NamedTemporaryFile
 import base64
 from htmlTemplates import expander_css, css, bot_template, user_template
 from datetime import datetime
+import uuid
 
 # Step 1: Process the PDF and create retrieval chain
 def process_file(doc):
@@ -90,20 +91,32 @@ def main():
             col1.warning("⚠️ Please upload and process a PDF first.")
 
     # Show relevant PDF section in iframe (always stay in the same tab!)
+    #import uuid
+
     if st.session_state.pdf_data and st.session_state.scroll_to_page is not None:
-        with NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
+        # Save full PDF to temp file
+        with NamedTemporaryFile(delete=False, suffix=".pdf", dir=".") as temp_pdf:
             temp_pdf.write(st.session_state.pdf_data)
             temp_pdf_path = temp_pdf.name
 
-        with open(temp_pdf_path, "rb") as f:
-            b64_pdf = base64.b64encode(f.read()).decode("utf-8")
+        # Generate a public-ish filename
+        unique_filename = f"pdf_{uuid.uuid4().hex}.pdf"
+        public_path = os.path.join("temp_pdfs", unique_filename)
+        os.makedirs("temp_pdfs", exist_ok=True)
+
+        with open(temp_pdf_path, "rb") as src, open(public_path, "wb") as dst:
+            dst.write(src.read())
 
         jump_to_page = st.session_state.scroll_to_page + 1
+
+        # Build local file path URL
+        pdf_url = f"/temp_pdfs/{unique_filename}#page={jump_to_page}"
+
         col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
         col2.markdown(
             f"""
             <iframe
-                src="data:application/pdf;base64,{b64_pdf}#page={jump_to_page}"
+                src="{pdf_url}"
                 width="100%"
                 height="900"
                 type="application/pdf"
