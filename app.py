@@ -41,7 +41,8 @@ def handle_userinput(query):
     for user_msg, bot_msg, ts in reversed(st.session_state.chat_history):
         st.session_state.expander1.markdown(f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>", unsafe_allow_html=True)
         st.session_state.expander1.write(user_template.replace("{{MSG}}", user_msg), unsafe_allow_html=True)
-        st.session_state.expander1.write(bot_template.replace("{{MSG}}", bot_msg), unsafe_allow_html=True)
+        cleaned_bot_msg = bot_msg.replace('target="_blank"', '')
+        st.session_state.expander1.write(bot_template.replace("{{MSG}}", cleaned_bot_msg), unsafe_allow_html=True)
         st.session_state.expander1.markdown("<hr style='margin: 5px 0; border: none; border-top: 1px solid #ccc;' />", unsafe_allow_html=True)
 
 # Step 3: Main app
