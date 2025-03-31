@@ -6,12 +6,11 @@ from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyMuPDFLoader
-from PyPDF2 import PdfReader, PdfWriter
+from PyPDF2 import PdfReader
 from tempfile import NamedTemporaryFile
 import base64
 from htmlTemplates import expander_css, css, bot_template, user_template
 from datetime import datetime
-import uuid
 
 # Step 1: Process the PDF and create retrieval chain
 def process_file(doc):
@@ -40,11 +39,17 @@ def handle_userinput(query):
 
     # Show latest chat at top
     for user_msg, bot_msg, ts in reversed(st.session_state.chat_history):
-        st.session_state.expander1.markdown(f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>", unsafe_allow_html=True)
+        st.session_state.expander1.markdown(
+            f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>",
+            unsafe_allow_html=True
+        )
         st.session_state.expander1.write(user_template.replace("{{MSG}}", user_msg), unsafe_allow_html=True)
         cleaned_bot_msg = bot_msg.replace('target="_blank"', '')
         st.session_state.expander1.write(bot_template.replace("{{MSG}}", cleaned_bot_msg), unsafe_allow_html=True)
-        st.session_state.expander1.markdown("<hr style='margin: 5px 0; border: none; border-top: 1px solid #ccc;' />", unsafe_allow_html=True)
+        st.session_state.expander1.markdown(
+            "<hr style='margin: 5px 0; border: none; border-top: 1px solid #ccc;' />",
+            unsafe_allow_html=True
+        )
 
 # Step 3: Main app
 def main():
@@ -90,33 +95,19 @@ def main():
         else:
             col1.warning("⚠️ Please upload and process a PDF first.")
 
-    # Show relevant PDF section in iframe (always stay in the same tab!)
-    #import uuid
+    # Display full PDF in iframe using base64 (compatible with Streamlit Cloud)
+    if st.session_state.pdf_data:
+        b64_pdf = base64.b64encode(st.session_state.pdf_data).decode("utf-8")
 
-    if st.session_state.pdf_data and st.session_state.scroll_to_page is not None:
-        # Save full PDF to temp file
-        with NamedTemporaryFile(delete=False, suffix=".pdf", dir=".") as temp_pdf:
-            temp_pdf.write(st.session_state.pdf_data)
-            temp_pdf_path = temp_pdf.name
-
-        # Generate a public-ish filename
-        unique_filename = f"pdf_{uuid.uuid4().hex}.pdf"
-        public_path = os.path.join("temp_pdfs", unique_filename)
-        os.makedirs("temp_pdfs", exist_ok=True)
-
-        with open(temp_pdf_path, "rb") as src, open(public_path, "wb") as dst:
-            dst.write(src.read())
-
-        jump_to_page = st.session_state.scroll_to_page + 1
-
-        # Build local file path URL
-        pdf_url = f"/temp_pdfs/{unique_filename}#page={jump_to_page}"
+        if st.session_state.scroll_to_page is not None:
+            scroll_info = f"📄 Scroll manually to Page {st.session_state.scroll_to_page + 1} for the relevant section."
+            col2.info(scroll_info)
 
         col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
         col2.markdown(
             f"""
             <iframe
-                src="{pdf_url}"
+                src="data:application/pdf;base64,{b64_pdf}"
                 width="100%"
                 height="900"
                 type="application/pdf"
@@ -126,6 +117,12 @@ def main():
             unsafe_allow_html=True
         )
 
+        col2.download_button(
+            label="Download Full PDF",
+            data=st.session_state.pdf_data,
+            file_name="your_document.pdf",
+            mime="application/pdf"
+        )
 
 if __name__ == "__main__":
     main()
