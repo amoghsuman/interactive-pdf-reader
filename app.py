@@ -96,18 +96,24 @@ def main():
 
     # Display the full PDF in a scrollable iframe, jump to page if set
     # Show the full PDF with correct iframe embedding (no new tab)
+    # Show the full PDF in a scrollable iframe, staying embedded
     if st.session_state.base64_pdf:
         page = (st.session_state.scroll_to_page or 0) + 1
 
-        st.session_state.col2.markdown("#### PDF Viewer", unsafe_allow_html=True)
-        pdf_display = f"""
-            <embed
+        st.session_state.col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
+
+        st.session_state.col2.markdown(
+            f"""
+            <iframe
                 src="data:application/pdf;base64,{st.session_state.base64_pdf}#page={page}"
-                width="100%" height="900px"
-                type="application/pdf">
-            </embed>
-        """
-        st.session_state.col2.markdown(pdf_display, unsafe_allow_html=True)
+                width="100%"
+                height="900"
+                style="border: none; overflow: hidden;"
+                allow="autoplay"
+            ></iframe>
+            """,
+            unsafe_allow_html=True
+        )
 
 if __name__ == "__main__":
     main()
