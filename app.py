@@ -6,63 +6,55 @@ from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyMuPDFLoader
-from PyPDF2 import PdfReader, PdfWriter
 from tempfile import NamedTemporaryFile
 import base64
 from htmlTemplates import expander_css, css, bot_template, user_template
 from datetime import datetime
-import uuid
 
-# Step 1: Process the PDF and create retrieval chain
-def process_file(doc):
+# Step 1: Create retrieval chain
+def process_file(documents):
     embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
-    vectorstore = FAISS.from_documents(doc, embeddings)
-    chain = ConversationalRetrievalChain.from_llm(
+    vectorstore = FAISS.from_documents(documents, embeddings)
+    return ConversationalRetrievalChain.from_llm(
         ChatOpenAI(temperature=0.3, openai_api_key=os.getenv("OPENAI_API_KEY")),
         retriever=vectorstore.as_retriever(search_kwargs={"k": 2}),
         return_source_documents=True
     )
-    return chain
 
-# Step 2: Handle user input and update chat + page
+# Step 2: Handle user questions
 def handle_userinput(query):
     response = st.session_state.conversation(
         {"question": query, 'chat_history': [(q, a) for q, a, _ in st.session_state.chat_history]},
         return_only_outputs=True
     )
     answer = response['answer'].strip()
-    source_doc = response['source_documents'][0]
-    page_num = source_doc.metadata.get("page", 0)
-
     timestamp = datetime.now().strftime("%b %d, %I:%M %p")
     st.session_state.chat_history.append((query, answer, timestamp))
-    st.session_state.scroll_to_page = page_num
 
-    # Show latest chat at top
-    for user_msg, bot_msg, ts in reversed(st.session_state.chat_history):
+    # Display chat messages
+    for q, a, ts in reversed(st.session_state.chat_history):
         st.session_state.expander1.markdown(f"<p style='text-align:right; font-size: 12px; color: gray;'>{ts}</p>", unsafe_allow_html=True)
-        st.session_state.expander1.write(user_template.replace("{{MSG}}", user_msg), unsafe_allow_html=True)
-        cleaned_bot_msg = bot_msg.replace('target="_blank"', '')
-        st.session_state.expander1.write(bot_template.replace("{{MSG}}", cleaned_bot_msg), unsafe_allow_html=True)
+        st.session_state.expander1.write(user_template.replace("{{MSG}}", q), unsafe_allow_html=True)
+        st.session_state.expander1.write(bot_template.replace("{{MSG}}", a), unsafe_allow_html=True)
         st.session_state.expander1.markdown("<hr style='margin: 5px 0; border: none; border-top: 1px solid #ccc;' />", unsafe_allow_html=True)
 
-# Step 3: Main app
+# Step 3: Main App
 def main():
     load_dotenv()
-    st.set_page_config(layout="wide", page_title="Interactive Reader", page_icon="📘")
+    st.set_page_config(layout="wide", page_title="Interactive PDF Reader", page_icon="📘")
     st.write(css, unsafe_allow_html=True)
 
     # Initialize session state
-    for key in ["conversation", "chat_history", "scroll_to_page", "pdf_data"]:
+    for key in ["conversation", "chat_history", "pdf_base64"]:
         if key not in st.session_state:
             st.session_state[key] = [] if key == "chat_history" else None
 
     col1, col2 = st.columns([1, 1])
-    col1.header("📘 Interactive Reader")
+    col1.header("📘 Ask Questions on Your PDF")
 
-    # Question form
-    with col1.form("ask_question_form", clear_on_submit=True):
-        user_question = st.text_input("Ask a question about the uploaded PDF:")
+    # Ask form
+    with col1.form("user_input_form", clear_on_submit=True):
+        user_question = st.text_input("Ask a question:")
         submitted = st.form_submit_button("Ask")
 
     st.session_state.expander1 = col1.expander("Your Chat", expanded=True)
@@ -70,18 +62,20 @@ def main():
 
     # Upload PDF
     col1.subheader("Upload Your PDF")
-    uploaded_file = col1.file_uploader("Upload your PDF and click 'Process'")
+    uploaded_file = col1.file_uploader("Upload and click 'Process'")
 
-    if col1.button("Process"):
-        if uploaded_file:
-            with st.spinner("Processing PDF..."):
-                st.session_state.pdf_data = uploaded_file.getvalue()
-                with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                    tmp.write(st.session_state.pdf_data)
-                    loader = PyMuPDFLoader(tmp.name)
-                    docs = loader.load()
-                    st.session_state.conversation = process_file(docs)
-                col1.success("✅ PDF processed. Ask your question now.")
+    if col1.button("Process") and uploaded_file:
+        with st.spinner("Processing..."):
+            pdf_bytes = uploaded_file.read()
+            st.session_state.pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+
+            with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(pdf_bytes)
+                loader = PyMuPDFLoader(tmp.name)
+                docs = loader.load()
+                st.session_state.conversation = process_file(docs)
+
+            col1.success("✅ PDF processed. You can now ask questions.")
 
     # Handle question
     if submitted and user_question:
@@ -90,42 +84,19 @@ def main():
         else:
             col1.warning("⚠️ Please upload and process a PDF first.")
 
-    # Show relevant PDF section in iframe (always stay in the same tab!)
-    #import uuid
-
-    if st.session_state.pdf_data and st.session_state.scroll_to_page is not None:
-        # Save full PDF to temp file
-        with NamedTemporaryFile(delete=False, suffix=".pdf", dir=".") as temp_pdf:
-            temp_pdf.write(st.session_state.pdf_data)
-            temp_pdf_path = temp_pdf.name
-
-        # Generate a public-ish filename
-        unique_filename = f"pdf_{uuid.uuid4().hex}.pdf"
-        public_path = os.path.join("temp_pdfs", unique_filename)
-        os.makedirs("temp_pdfs", exist_ok=True)
-
-        with open(temp_pdf_path, "rb") as src, open(public_path, "wb") as dst:
-            dst.write(src.read())
-
-        jump_to_page = st.session_state.scroll_to_page + 1
-
-        # Build local file path URL
-        pdf_url = f"/temp_pdfs/{unique_filename}#page={jump_to_page}"
-
-        col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
-        col2.markdown(
-            f"""
+    # Display full scrollable PDF on right
+    if st.session_state.pdf_base64:
+        iframe_code = f"""
             <iframe
-                src="{pdf_url}"
+                src="data:application/pdf;base64,{st.session_state.pdf_base64}"
                 width="100%"
                 height="900"
                 type="application/pdf"
                 style="border: none;"
             ></iframe>
-            """,
-            unsafe_allow_html=True
-        )
-
+        """
+        col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
+        col2.markdown(iframe_code, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
