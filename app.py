@@ -47,76 +47,81 @@ def handle_userinput(query):
 # Step 3: Main app
 def main():
     load_dotenv()
-    st.set_page_config(layout="wide", page_title="Interactive Reader", page_icon=":books:")
+    st.set_page_config(layout="wide", page_title="Interactive Reader", page_icon="📘")
     st.write(css, unsafe_allow_html=True)
 
     # Initialize session state
-    for key in ["conversation", "chat_history", "scroll_to_page", "pdf_doc"]:
+    for key in ["conversation", "chat_history", "scroll_to_page", "pdf_data"]:
         if key not in st.session_state:
             st.session_state[key] = [] if key == "chat_history" else None
 
-    st.session_state.col1, st.session_state.col2 = st.columns([1, 1])
-    st.session_state.col1.header("Interactive Reader :books:")
+    col1, col2 = st.columns([1, 1])
+    col1.header("📘 Interactive Reader")
 
-    # Form input for controlled question submission
-    with st.session_state.col1.form("user_input_form", clear_on_submit=True):
-        user_question = st.text_input("Ask a question on the contents of the uploaded PDF:")
+    # Question form
+    with col1.form("ask_question_form", clear_on_submit=True):
+        user_question = st.text_input("Ask a question about the uploaded PDF:")
         submitted = st.form_submit_button("Ask")
 
-    st.session_state.expander1 = st.session_state.col1.expander("Your Chat", expanded=True)
-    st.session_state.col1.markdown(expander_css, unsafe_allow_html=True)
+    st.session_state.expander1 = col1.expander("Your Chat", expanded=True)
+    col1.markdown(expander_css, unsafe_allow_html=True)
 
-    # Upload and process PDF
-    st.session_state.col1.subheader("Your documents")
-    st.session_state.pdf_doc = st.session_state.col1.file_uploader("Upload your PDF here and click on 'Process'")
+    # Upload PDF
+    col1.subheader("Upload Your PDF")
+    uploaded_file = col1.file_uploader("Upload your PDF and click 'Process'")
 
-    if st.session_state.col1.button("Process", key="process_btn"):
-        if st.session_state.pdf_doc is not None:
-            with st.spinner("Processing..."):
-                with NamedTemporaryFile(suffix=".pdf") as temp:
-                    temp.write(st.session_state.pdf_doc.getvalue())
-                    temp.seek(0)
-                    loader = PyMuPDFLoader(temp.name)
+    if col1.button("Process"):
+        if uploaded_file:
+            with st.spinner("Processing PDF..."):
+                st.session_state.pdf_data = uploaded_file.getvalue()
+                with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    tmp.write(st.session_state.pdf_data)
+                    loader = PyMuPDFLoader(tmp.name)
                     docs = loader.load()
                     st.session_state.conversation = process_file(docs)
-                    st.session_state.col1.success("✅ Done processing. You may now ask a question.")
+                col1.success("✅ PDF processed. Ask your question now.")
 
     # Handle question
     if submitted and user_question:
-        if st.session_state.conversation is not None:
+        if st.session_state.conversation:
             handle_userinput(user_question)
         else:
-            st.session_state.col1.warning("⚠️ Please upload and process a PDF before asking a question.")
+            col1.warning("⚠️ Please upload and process a PDF first.")
 
-    # Always display extracted relevant PDF pages (scrollable inside iframe)
-    if st.session_state.pdf_doc is not None and st.session_state.scroll_to_page is not None:
-        with NamedTemporaryFile(suffix="pdf") as temp:
-            temp.write(st.session_state.pdf_doc.getvalue())
-            temp.seek(0)
-            reader = PdfReader(temp.name)
+    # Show relevant PDF section in iframe (always stay in the same tab!)
+    if st.session_state.pdf_data and st.session_state.scroll_to_page is not None:
+        with NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
+            temp_pdf.write(st.session_state.pdf_data)
+            temp_pdf.seek(0)
 
-            pdf_writer = PdfWriter()
+            # Extract 2 pages before and after the referenced one
+            reader = PdfReader(temp_pdf.name)
+            writer = PdfWriter()
             start = max(st.session_state.scroll_to_page - 2, 0)
             end = min(st.session_state.scroll_to_page + 2, len(reader.pages) - 1)
-            while start <= end:
-                pdf_writer.add_page(reader.pages[start])
-                start += 1
 
-            with NamedTemporaryFile(suffix="pdf") as temp2:
-                pdf_writer.write(temp2.name)
-                with open(temp2.name, "rb") as f:
-                    base64_pdf = base64.b64encode(f.read()).decode("utf-8")
+            for i in range(start, end + 1):
+                writer.add_page(reader.pages[i])
 
-                page_num = st.session_state.scroll_to_page + 1
-                iframe_code = f"""
-                    <iframe
-                        src="data:application/pdf;base64,{base64_pdf}#page={page_num}"
-                        width="100%" height="900"
-                        type="application/pdf" frameborder="0"
-                    ></iframe>
-                """
-                st.session_state.col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
-                st.session_state.col2.markdown(iframe_code, unsafe_allow_html=True)
+            with NamedTemporaryFile(delete=False, suffix=".pdf") as display_pdf:
+                writer.write(display_pdf.name)
+                with open(display_pdf.name, "rb") as f:
+                    b64_pdf = base64.b64encode(f.read()).decode("utf-8")
+
+        jump_to_page = st.session_state.scroll_to_page + 1
+        col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
+        col2.markdown(
+            f"""
+            <iframe
+                src="data:application/pdf;base64,{b64_pdf}#page={jump_to_page}"
+                width="100%"
+                height="900"
+                type="application/pdf"
+                style="border: none;"
+            ></iframe>
+            """,
+            unsafe_allow_html=True
+        )
 
 if __name__ == "__main__":
     main()
