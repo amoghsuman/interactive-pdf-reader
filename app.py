@@ -93,21 +93,10 @@ def main():
     if st.session_state.pdf_data and st.session_state.scroll_to_page is not None:
         with NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
             temp_pdf.write(st.session_state.pdf_data)
-            temp_pdf.seek(0)
+            temp_pdf_path = temp_pdf.name
 
-            # Extract 2 pages before and after the referenced one
-            reader = PdfReader(temp_pdf.name)
-            writer = PdfWriter()
-            start = max(st.session_state.scroll_to_page - 2, 0)
-            end = min(st.session_state.scroll_to_page + 2, len(reader.pages) - 1)
-
-            for i in range(start, end + 1):
-                writer.add_page(reader.pages[i])
-
-            with NamedTemporaryFile(delete=False, suffix=".pdf") as display_pdf:
-                writer.write(display_pdf.name)
-                with open(display_pdf.name, "rb") as f:
-                    b64_pdf = base64.b64encode(f.read()).decode("utf-8")
+        with open(temp_pdf_path, "rb") as f:
+            b64_pdf = base64.b64encode(f.read()).decode("utf-8")
 
         jump_to_page = st.session_state.scroll_to_page + 1
         col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
@@ -123,6 +112,7 @@ def main():
             """,
             unsafe_allow_html=True
         )
+
 
 if __name__ == "__main__":
     main()
