@@ -1,6 +1,7 @@
 streamlit
 langchain
 langchain-community
+langchain-core
 openai
 PyPDF2
 python-dotenv
