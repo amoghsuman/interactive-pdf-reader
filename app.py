@@ -90,20 +90,27 @@ def main():
         else:
             st.session_state.col1.warning("⚠️ Please upload and process a PDF before asking a question.")
 
-    # Always display the full PDF with scroll-to-page
-    if st.session_state.base64_pdf:
-        scroll_page = (st.session_state.scroll_to_page or 0) + 1
+    # Generate base64 version only once
+    if "base64_pdf" not in st.session_state and st.session_state.pdf_doc is not None:
+        with NamedTemporaryFile(suffix="pdf", delete=False) as full_temp:
+            full_temp.write(st.session_state.pdf_doc.getvalue())
+            full_temp.flush()
+            with open(full_temp.name, "rb") as f:
+                st.session_state.base64_pdf = base64.b64encode(f.read()).decode("utf-8")
 
-        pdf_viewer = f"""
-        <div style="height: 900px;">
-            <iframe
-                src="data:application/pdf;base64,{st.session_state.base64_pdf}#page={scroll_page}"
-                width="100%" height="100%" style="border:none;"
-                type="application/pdf">
-            </iframe>
-        </div>
+    # Always display the PDF in an iframe — scrollable + page jump
+    if st.session_state.base64_pdf:
+        scroll_page = (st.session_state.scroll_to_page or 0) + 1  # Page offset
+
+        iframe_code = f"""
+        <iframe
+            src="data:application/pdf;base64,{st.session_state.base64_pdf}#page={scroll_page}"
+            width="100%" height="900" type="application/pdf"
+            style="border: none;">
+        </iframe>
         """
-        st.session_state.col2.markdown(pdf_viewer, unsafe_allow_html=True)
+
+        st.session_state.col2.markdown(iframe_code, unsafe_allow_html=True)
 
 if __name__ == '__main__':
     main()
