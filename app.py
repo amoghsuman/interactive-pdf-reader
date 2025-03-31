@@ -1,5 +1,6 @@
 import os
 import streamlit as st
+import streamlit.components.v1 as components  # add this at the top
 from dotenv import load_dotenv
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.chat_models import ChatOpenAI
@@ -98,22 +99,19 @@ def main():
     # Show the full PDF with correct iframe embedding (no new tab)
     # Show the full PDF in a scrollable iframe, staying embedded
     if st.session_state.base64_pdf:
-        page = (st.session_state.scroll_to_page or 0) + 1
+    page = (st.session_state.scroll_to_page or 0) + 1
+    iframe_html = f"""
+        <iframe
+            src="data:application/pdf;base64,{st.session_state.base64_pdf}#page={page}"
+            width="100%"
+            height="900"
+            type="application/pdf"
+            style="border: none;"
+        ></iframe>
+    """
+    st.session_state.col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
+    st.session_state.col2.markdown(iframe_html, unsafe_allow_html=True)
 
-        st.session_state.col2.markdown("#### 📄 PDF Viewer", unsafe_allow_html=True)
-
-        st.session_state.col2.markdown(
-            f"""
-            <iframe
-                src="data:application/pdf;base64,{st.session_state.base64_pdf}#page={page}"
-                width="100%"
-                height="900"
-                style="border: none; overflow: hidden;"
-                allow="autoplay"
-            ></iframe>
-            """,
-            unsafe_allow_html=True
-        )
 
 if __name__ == "__main__":
     main()
